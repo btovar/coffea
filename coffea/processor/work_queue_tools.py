@@ -751,6 +751,13 @@ def _submit_accum_tasks(
     if chunks_per_accum < 2 or chunks_accum_in_mem < 2:
         raise RuntimeError("A minimum of two chunks should be used when accumulating")
 
+    # we wait until we have almost enough for two accumulation tasks. In this
+    # way, we give preference to merge the smaller chunks together.
+    if not force_last_accum and len(tasks_to_accumulate) < (2 * chunks_per_accum - 1):
+        return tasks_to_accumulate
+
+    tasks_to_accumulate.sort(key=len)
+
     for next_to_accum in _group_lst(tasks_to_accumulate, chunks_per_accum):
         # return immediately if not enough for a single accumulation
         if len(next_to_accum) < 2:
