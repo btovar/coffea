@@ -706,7 +706,7 @@ def _declare_resources(exec_defaults):
 
         if exec_defaults["resources_mode"] == "auto":
             _wq_queue.specify_category_mode(
-                category, wq.WORK_QUEUE_ALLOCATION_MODE_MAX_THROUGHPUT
+                category, wq.WORK_QUEUE_ALLOCATION_MODE_MAX
             )
 
 
