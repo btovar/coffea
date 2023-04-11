@@ -5,6 +5,7 @@ import signal
 
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from os.path import basename, join, getsize
+from pathlib import Path
 
 import collections
 
@@ -86,6 +87,7 @@ class CoffeaWQ(WorkQueue):
         self,
         executor,
     ):
+        Path(executor.filepath).mkdir(parents=True, exist_ok=True)
         self._staging_dir_obj = TemporaryDirectory("wq-tmp-", dir=executor.filepath)
 
         self.executor = executor
