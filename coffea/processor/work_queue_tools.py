@@ -5,7 +5,6 @@ import signal
 
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from os.path import basename, join, getsize
-from pathlib import Path
 
 import collections
 
@@ -47,17 +46,36 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
 
     # work on local copy of list
     files_to_accumulate = list(files_to_accumulate)
+
+    import time
+
+    load_time = 0
+    accum_time = 0
+    size = 0
+
     while files_to_accumulate:
         f = files_to_accumulate.pop()
 
+        t = time.perf_counter_ns()
         with open(f, "rb") as rf:
             result = _decompress(rf.read())
+            load_time += time.perf_counter_ns() - t
+            size += rf.tell()
+
         if not accumulator:
             accumulator = result
             continue
 
+        t = time.perf_counter_ns()
         accumulator = accumulate([result], accumulator)
+        accum_time += time.perf_counter_ns() - t
+
         del result
+
+    print(
+        f"--------------- ACCUMTIMES: LOAD: {load_time/10e9} MERGE: {accum_time/10e9} SIZE: {size/(1024*1024)}",
+        flush=True,
+    )
     return accumulator
 
 
@@ -87,7 +105,6 @@ class CoffeaWQ(WorkQueue):
         self,
         executor,
     ):
-        Path(executor.filepath).mkdir(parents=True, exist_ok=True)
         self._staging_dir_obj = TemporaryDirectory("wq-tmp-", dir=executor.filepath)
 
         self.executor = executor
@@ -826,7 +843,7 @@ class CoffeaWQTask(Task):
                 (self.cmd_execution_time) / 1e6,
             )
 
-        if queue.executor.print_stdout or not (self.successful() or self.exhausted()):
+        if queue.executor.print_stdout or not (self.successful() or self.exhausted()) or self.category == "accumulating":
             if self.std_output:
                 queue.console.print("    output:")
                 queue.console.print(self.std_output)
