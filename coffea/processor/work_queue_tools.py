@@ -140,8 +140,8 @@ class CoffeaWQ(WorkQueue):
     def __del__(self):
         try:
             self._staging_dir_obj.cleanup()
-        finally:
-            super().__del__()
+        except Exception:
+            pass
 
     def _check_executor_parameters(self, executor):
         if executor.environment_file and not executor.wrapper:
@@ -300,12 +300,11 @@ class CoffeaWQ(WorkQueue):
         while True:
             if early_terminate or self._items_empty:
                 return
-            if not self.hungry():
-                return
             sc = self.stats_coffea
             if sc["events_submitted"] >= sc["events_total"]:
                 return
-
+            if not self.hungry():
+                return
             try:
                 if sc["events_submitted"] > 0:
                     # can't send if generator not initialized first with a next
@@ -366,11 +365,12 @@ class CoffeaWQ(WorkQueue):
         except StopIteration:
             pass
 
-        unproc = self.known_workitems - accumulator["processed"]
-        accumulator["unprocessed"] = unproc
-        if unproc:
-            count = sum(len(item) for item in unproc)
-            self.console.warn(f"{len(unproc)} unprocessed item(s) ({count} event(s)).")
+        if accumulator:
+            unproc = self.known_workitems - accumulator["processed"]
+            accumulator["unprocessed"] = unproc
+            if unproc:
+                count = sum(len(item) for item in unproc)
+                self.console.warn(f"{len(unproc)} unprocessed item(s) ({count} event(s)).")
 
     def _processing(self, items, function, accumulator):
         function = _compression_wrapper(self.executor.compression, function)
@@ -468,6 +468,8 @@ class CoffeaWQ(WorkQueue):
             min_accum = 2
         else:
             min_accum = treereduction
+            if early_terminate:
+                return
 
         self.tasks_to_accumulate.sort(key=lambda t: t.fout_size)
 
@@ -516,6 +518,8 @@ class CoffeaWQ(WorkQueue):
 
         # Evenly divide resources in workers per category
         self.tune("force-proportional-resources", 1)
+
+        self.tune("hungry-minimum", 100)
 
         # if resource_monitor is given, and not 'off', then monitoring is activated.
         # anything other than 'measure' is assumed to be 'watchdog' mode, where in
@@ -1133,6 +1137,7 @@ def _handle_early_terminate(signum, frame, raise_on_repeat=True):
         )
         early_terminate = True
         _wq_queue.cancel_by_category("processing")
+        _wq_queue.cancel_by_category("accumulating")
 
 
 def _get_x509_proxy(x509_proxy=None):
