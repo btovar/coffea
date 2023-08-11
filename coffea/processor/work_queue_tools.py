@@ -42,12 +42,16 @@ early_terminate = False
 # We declare it before checking for wq so that we do not need to install wq at
 # the remote site.
 def accumulate_result_files(files_to_accumulate, accumulator=None):
+    import time
+    from datetime import datetime
+
+    start = datetime.now().strftime("%H_%M_%S")
+
     from coffea.processor import accumulate
 
     # work on local copy of list
     files_to_accumulate = list(files_to_accumulate)
 
-    import time
 
     load_time = 0
     accum_time = 0
@@ -72,8 +76,10 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
 
         del result
 
+    end = datetime.now().strftime("%H_%M_%S")
+
     print(
-        f"--------------- ACCUMTIMES: LOAD: {load_time/10e9} MERGE: {accum_time/10e9} SIZE: {size/(1024*1024)}",
+        f"--------------- ACCUMTIMES: START: {start} END: {end} LOAD: {load_time/10e9} MERGE: {accum_time/10e9} SIZE: {size/(1024*1024)}",
         flush=True,
     )
     return accumulator

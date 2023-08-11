@@ -218,8 +218,23 @@ class _compression_wrapper(object):
 
     # no @wraps due to pickle
     def __call__(self, *args, **kwargs):
+        import time
+        from datetime import datetime
+
+        start = datetime.now().strftime("%H_%M_%S")
+
+        ft = time.perf_counter_ns()
         out = self.function(*args, **kwargs)
-        return _compress(out, self.level)
+        ft = time.perf_counter_ns() - ft
+
+        ct = time.perf_counter_ns()
+        c = _compress(out, self.level)
+        ct = time.perf_counter_ns() - ct
+
+        end = datetime.now().strftime("%H_%M_%S")
+
+        print(f"--------------- FUNCTIMES: START: {start} END: {end} EXEC: {ft/10e9} COMP: {ct/10e9}", flush=True)
+        return c
 
 
 class _reduce:
@@ -392,7 +407,7 @@ def _watcher(
                     elif isinstance(executor, ParslExecutor):
                         FH.add_merge(merge_fcn(batch))
                     else:
-                        raise RuntimeError("Invalid executor")
+                        raise RuniimeError("Invalid executor")
                     progress.update(
                         p_idm,
                         total=progress._tasks[p_idm].total + 1,
