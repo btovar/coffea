@@ -223,13 +223,13 @@ class _compression_wrapper(object):
 
         start = datetime.now().strftime("%H_%M_%S")
 
-        ft = time.perf_counter_ns()
+        ft = time.time_ns()
         out = self.function(*args, **kwargs)
-        ft = time.perf_counter_ns() - ft
+        ft = time.time_ns() - ft
 
-        ct = time.perf_counter_ns()
+        ct = time.time_ns()
         c = _compress(out, self.level)
-        ct = time.perf_counter_ns() - ct
+        ct = time.time_ns() - ct
 
         end = datetime.now().strftime("%H_%M_%S")
 

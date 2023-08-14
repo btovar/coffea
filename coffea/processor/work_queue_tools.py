@@ -60,19 +60,20 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     while files_to_accumulate:
         f = files_to_accumulate.pop()
 
-        t = time.perf_counter_ns()
+        t = time.time_ns()
         with open(f, "rb") as rf:
             result = _decompress(rf.read())
-            load_time += time.perf_counter_ns() - t
+            load_time += time.time_ns() - t
+            rf.seek(2, 0)
             size += rf.tell()
 
         if not accumulator:
             accumulator = result
             continue
 
-        t = time.perf_counter_ns()
+        t = time.time_ns()
         accumulator = accumulate([result], accumulator)
-        accum_time += time.perf_counter_ns() - t
+        accum_time += time.time_ns() - t
 
         del result
 
