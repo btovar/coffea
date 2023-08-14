@@ -45,6 +45,11 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     import time
     from datetime import datetime
 
+    import cProfile, pstats, io
+    from pstats import SortKey
+    pr = cProfile.Profile()
+    import numpy as np
+
     start = datetime.now().strftime("%H_%M_%S")
 
     from coffea.processor import accumulate
@@ -54,8 +59,8 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
 
     load_time = 0
     accum_time = 0
-    size = 0
 
+    pr.enable()
     while files_to_accumulate:
         f = files_to_accumulate.pop()
 
@@ -63,8 +68,6 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
         with open(f, "rb") as rf:
             result = _decompress(rf.read())
             load_time += time.time_ns() - t
-            rf.seek(2, 0)
-            size += rf.tell()
 
         if not accumulator:
             accumulator = result
@@ -79,16 +82,23 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     end = datetime.now().strftime("%H_%M_%S")
 
     print(
-        f"--------------- ACCUMTIMES: START: {start} END: {end} LOAD: {load_time/1e9} MERGE: {accum_time/1e9} SIZE: {size/(1024*1024)}",
+        f"--------------- ACCUMTIMES: START: {start} END: {end} LOAD: {load_time/1e9} MERGE: {accum_time/1e9}",
         flush=True,
     )
+    pr.disable()
 
-    for k, h in accumulator.items():
+    for k, h in accumulator["out"].items():
         v = h.view()
-        nz = sum(v == 0)
-        no = sum(v != 0)
+        nz = np.sum(v == 0)
+        no = max(1, len(v.ravel()))
 
-        print(f"{k}  efficiency: {(100.0*nz)/no:6.2}")
+        print(f"{k}  efficiency: {nz}/{no} {100.0*(nz/no):6.2f}")
+
+    s = io.StringIO()
+    sortby = SortKey.CUMULATIVE
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+    print(s.getvalue())
 
     print("++++++++++++++")
 
