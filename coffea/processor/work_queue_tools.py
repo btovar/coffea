@@ -52,7 +52,6 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     # work on local copy of list
     files_to_accumulate = list(files_to_accumulate)
 
-
     load_time = 0
     accum_time = 0
     size = 0
@@ -83,6 +82,16 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
         f"--------------- ACCUMTIMES: START: {start} END: {end} LOAD: {load_time/1e9} MERGE: {accum_time/1e9} SIZE: {size/(1024*1024)}",
         flush=True,
     )
+
+    for k, h in accumulator.items():
+        v = h.view()
+        nz = sum(v == 0)
+        no = sum(v != 0)
+
+        print(f"{k}  efficiency: {(100.0*nz)/no:6.2}")
+
+    print("++++++++++++++")
+
     return accumulator
 
 
