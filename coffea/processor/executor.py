@@ -233,7 +233,7 @@ class _compression_wrapper(object):
 
         end = datetime.now().strftime("%H_%M_%S")
 
-        print(f"--------------- FUNCTIMES: START: {start} END: {end} EXEC: {ft/10e9} COMP: {ct/10e9}", flush=True)
+        print(f"--------------- FUNCTIMES: START: {start} END: {end} EXEC: {ft/1e9} COMP: {ct/1e9}", flush=True)
         return c
 
 

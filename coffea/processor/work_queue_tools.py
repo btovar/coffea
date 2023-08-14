@@ -80,7 +80,7 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     end = datetime.now().strftime("%H_%M_%S")
 
     print(
-        f"--------------- ACCUMTIMES: START: {start} END: {end} LOAD: {load_time/10e9} MERGE: {accum_time/10e9} SIZE: {size/(1024*1024)}",
+        f"--------------- ACCUMTIMES: START: {start} END: {end} LOAD: {load_time/1e9} MERGE: {accum_time/1e9} SIZE: {size/(1024*1024)}",
         flush=True,
     )
     return accumulator
