@@ -47,6 +47,7 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
 
     import cProfile, pstats, io
     from pstats import SortKey
+
     pr = cProfile.Profile()
     import numpy as np
 
@@ -90,14 +91,20 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     for k, h in accumulator["out"].items():
         v = h.view()
         nz = np.sum(v == 0)
-        no = max(1, len(v.ravel()))
+        no = len(v.ravel())
+        print(f"{k}  efficiency: {nz}/{no} {100.0*(nz/max(no,1)):6.2f}  ~GB: {8.0*no/(1024.0*1024.0*1024.0)}")
 
-        print(f"{k}  efficiency: {nz}/{no} {100.0*(nz/no):6.2f}")
-
+    print("--- cumulative profile:")
     s = io.StringIO()
     sortby = SortKey.CUMULATIVE
     ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    ps.print_stats()
+    ps.print_stats(10)
+    print(s.getvalue())
+    print("--- time profile:")
+    s = io.StringIO()
+    sortby = SortKey.TIME
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats(10)
     print(s.getvalue())
 
     print("++++++++++++++")
