@@ -89,10 +89,16 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     pr.disable()
 
     for k, h in accumulator["out"].items():
-        v = h.view()
-        nz = np.sum(v == 0)
-        no = len(v.ravel())
-        print(f"{k}  efficiency: {nz}/{no} {100.0*(nz/max(no,1)):6.2f}  ~GB: {8.0*no/(1024.0*1024.0*1024.0)}")
+        vs = h.view(flow=True)
+        total = 0
+        zeros = 0
+
+        for v in vs.values():
+            total += len(v.ravel())
+            zeros += np.sum(v == 0)
+        print(
+            f"{k}  zeros %: {zeros}/{total} {100.0*(zeros/max(total,1)):6.2f}  total size ~GB: {8.0*total/(1024.0*1024.0*1024.0)}"
+        )
 
     print("--- cumulative profile:")
     s = io.StringIO()
