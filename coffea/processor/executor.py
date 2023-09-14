@@ -617,7 +617,7 @@ class WorkQueueExecutor(ExecutorBase):
     memory: Optional[int] = None
     disk: Optional[int] = None
     gpus: Optional[int] = None
-    treereduction: int = 20
+    treereduction: int = 10
     chunksize: int = 100000
     dynamic_chunksize: Optional[Dict] = None
     custom_init: Optional[Callable] = None
