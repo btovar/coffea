@@ -356,7 +356,7 @@ class CoffeaVine(Manager):
 
         self.console("Merging with local final accumulator...")
         accumulator = accumulate_result_files(
-            [t.output_file for t in self.tasks_to_accumulate], accumulator
+            [t.output_file.source() for t in self.tasks_to_accumulate], accumulator
         )
 
         total_accumulated_events = 0
@@ -799,7 +799,7 @@ class PreProcTask(CoffeaVineTask):
 
 
 class ProcTask(CoffeaVineTask):
-    def __init__(self, m, fn, item, itemid=None):
+    def __init__(self, m, fn, item, itemid=None, bring_back_output=False):
         self.size = len(item)
 
         if not itemid:
@@ -807,7 +807,7 @@ class ProcTask(CoffeaVineTask):
 
         self.item = item
 
-        super().__init__(m, fn, [item], itemid, bring_back_output=False)
+        super().__init__(m, fn, [item], itemid, bring_back_output=bring_back_output)
 
         self.set_category("processing")
 
@@ -898,6 +898,7 @@ class AccumTask(CoffeaVineTask):
         fn,
         tasks_to_accumulate,
         itemid=None,
+        bring_back_output=False
     ):
         if not itemid:
             itemid = "accum_{}".format(CoffeaVineTask.tasks_counter)
@@ -905,9 +906,9 @@ class AccumTask(CoffeaVineTask):
         self.tasks_to_accumulate = tasks_to_accumulate
         self.size = sum(len(t) for t in self.tasks_to_accumulate)
 
-        names = ["file.{i}" for (i, t) in enumerate(self.tasks_to_accumulate)]
+        names = [f"file.{i}" for (i, t) in enumerate(self.tasks_to_accumulate)]
 
-        super().__init__(m, fn, [names], itemid)
+        super().__init__(m, fn, [names], itemid, bring_back_output=bring_back_output)
 
         self.set_category("accumulating")
         for (name, t) in zip(names, self.tasks_to_accumulate):
