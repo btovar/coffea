@@ -8,6 +8,7 @@ from os.path import join
 import collections
 
 import math
+import random
 
 from coffea.util import rich_bar
 
@@ -477,7 +478,9 @@ class CoffeaVine(Manager):
         force = False
         min_accum = treereduction
 
-        if sc["events_processed"] >= sc["events_total"]  or early_terminate:
+        bring_back = random.random() < 0.1
+
+        if sc["events_processed"] >= sc["events_total"] or early_terminate:
             s = self.stats
             if s.tasks_waiting + s.tasks_on_workers == 0:
                 force = True
@@ -633,7 +636,9 @@ class CoffeaVineTask(PythonTask):
 
         self.disable_output_serialization()
 
-        if not bring_back_output:
+        if bring_back_output:
+            self.set_output_cache(True)
+        else:
             self.enable_temp_output()
 
         for name, f in m.extra_input_files.items():
@@ -675,6 +680,12 @@ class CoffeaVineTask(PythonTask):
         pass
 
     def cleanup_outputs(self, m):
+        try:
+            name = self.output_file.source()
+            if name:
+                os.remove(name)
+        except FileNotFoundError:
+            pass
         m.remove_file(self.output_file)
 
     def clone(self, m):
@@ -904,15 +915,21 @@ class AccumTask(CoffeaVineTask):
 
         super().__init__(m, fn, [names], itemid, bring_back_output=bring_back_output)
 
+        self._checkpoint = bring_back_output
+
         self.set_category("accumulating")
         for (name, t) in zip(names, self.tasks_to_accumulate):
             self.add_input(t.output_file, name)
 
+    def is_checkpoint(self):
+        return self._checkpoint
+
     def cleanup_inputs(self, m):
         super().cleanup_inputs(m)
         # cleanup files associated with results already accumulated
-        for t in self.tasks_to_accumulate:
-            t.cleanup_outputs(m)
+        if self.is_checkpoint():
+            for t in self.tasks_to_accumulate:
+                t.cleanup_outputs(m)
 
     def clone(self, m):
         return AccumTask(
