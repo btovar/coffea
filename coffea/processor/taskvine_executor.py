@@ -322,7 +322,7 @@ class CoffeaVine(Manager):
         self.bar.stop_task("Preprocessing")
         return accumulator
 
-    def _submit_processing_tasks(self, infile_procc_fn, items):
+    def _submit_processing_tasks(self, proc_fn, items):
         while True:
             if early_terminate or self._items_empty:
                 return
@@ -337,15 +337,15 @@ class CoffeaVine(Manager):
                     item = items.send(self.chunksize_current)
                 else:
                     item = next(items)
-                self._submit_processing_task(infile_procc_fn, item)
+                self._submit_processing_task(proc_fn, item)
             except StopIteration:
                 self.console.warn("Ran out of items to process.")
                 self._items_empty = True
                 return
 
-    def _submit_processing_task(self, infile_procc_fn, item):
+    def _submit_processing_task(self, proc_fn, item):
         self.known_workitems.add(item)
-        t = ProcTask(self, infile_procc_fn, item)
+        t = ProcTask(self, proc_fn, item)
         self.submit(t)
         self.stats_coffea["events_submitted"] += len(t)
 
@@ -436,67 +436,61 @@ class CoffeaVine(Manager):
         self._update_bars(final_update=True)
         return accumulator
 
-    def _process_events(self, infile_procc_fn, infile_accum_fn, items):
+    def _process_events(self, proc_fn, accum_fn, items):
         self.known_workitems = set()
         sc = self.stats_coffea
         self._items_empty = False
 
         while True:
             if self.empty():
-                if early_terminate or self._items_empty:
+                if self._items_empty:
                     break
-                if sc["events_total"] <= sc["events_processed"]:
+                if sc["events_total"] <= sc["events_processed"] and len(self.tasks_to_accumulate) < 2:
                     break
 
-            self._submit_processing_tasks(infile_procc_fn, items)
+            self._submit_processing_tasks(proc_fn, items)
 
             # When done submitting, look for completed tasks.
             task = self.wait(5)
+            if task:
+                if not task.successful():
+                    task.resubmit(self)
+                    continue
+                self.tasks_to_accumulate.append(task)
+                if re.match("processing", task.category):
+                    self._add_task_report(task)
+                    sc["events_processed"] += len(task)
+                    sc["chunks_processed"] += 1
+                elif task.category == "accumulating":
+                    sc["accumulations_done"] += 1
+                else:
+                    raise RuntimeError(f"Unrecognized task category {task.category}")
 
-            if not task:
-                continue
-
-            if not task.successful():
-                task.resubmit(self)
-                continue
-
-            self.tasks_to_accumulate.append(task)
-
-            if re.match("processing", task.category):
-                self._add_task_report(task)
-                sc["events_processed"] += len(task)
-                sc["chunks_processed"] += 1
-            elif task.category == "accumulating":
-                sc["accumulations_done"] += 1
-            else:
-                raise RuntimeError(f"Unrecognized task category {task.category}")
-
-            self._submit_accum_tasks(infile_accum_fn)
+            self._submit_accum_tasks(accum_fn)
             self._update_bars()
 
-    def _submit_accum_tasks(self, infile_accum_fn):
+    def _submit_accum_tasks(self, accum_fn):
         treereduction = self.executor.treereduction
 
         sc = self.stats_coffea
-        force = early_terminate
+        bring_back = False
+        force = False
+        min_accum = treereduction
 
-        if sc["events_processed"] >= sc["events_total"]:
-            s = manager.stats
-            if len(self.tasks_to_accumulate) + s.tasks_waiting + s.tasks_on_workers < 3:
+        if sc["events_processed"] >= sc["events_total"]  or early_terminate:
+            s = self.stats
+            if s.tasks_waiting + s.tasks_on_workers == 0:
                 force = True
+                if len(self.tasks_to_accumulate) < 2:
+                    return
+                elif min_accum > len(self.tasks_to_accumulate):
+                    bring_back = True
+                    min_accum = 1
 
         if len(self.tasks_to_accumulate) < (2 * treereduction) - 1 and (not force):
             return
 
-        if force:
-            min_accum = 2
-        else:
-            min_accum = treereduction
-            if early_terminate:
-                return
-
         self.tasks_to_accumulate.sort(key=lambda t: len(t))
-
         for start in range(0, len(self.tasks_to_accumulate), treereduction):
             if len(self.tasks_to_accumulate) < min_accum:
                 break
@@ -505,7 +499,7 @@ class CoffeaVine(Manager):
             next_to_accum = self.tasks_to_accumulate[0:end]
             self.tasks_to_accumulate = self.tasks_to_accumulate[end:]
 
-            accum_task = AccumTask(self, infile_accum_fn, next_to_accum, bring_back_output=force)
+            accum_task = AccumTask(self, accum_fn, next_to_accum, bring_back_output=bring_back)
             self.submit(accum_task)
             sc["accumulations_submitted"] += 1
 
