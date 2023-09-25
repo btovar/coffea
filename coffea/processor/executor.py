@@ -578,7 +578,7 @@ class TaskVineExecutor(ExecutorBase):
     """
 
     # Standard executor options:
-    compression: Optional[int] = 9  # as recommended by lz4
+    compression: Optional[int] = -2048  # fast acceleration
     retries: int = 2  # task executes at most 3 times
     # wq executor options:
     manager_name: Optional[str] = None

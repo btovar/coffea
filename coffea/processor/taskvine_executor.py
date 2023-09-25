@@ -8,7 +8,6 @@ from os.path import join
 import collections
 
 import math
-import random
 
 from coffea.util import rich_bar
 
@@ -472,35 +471,53 @@ class CoffeaVine(Manager):
 
     def _submit_accum_tasks(self, accum_fn):
         treereduction = self.executor.treereduction
+        treereduction = 10
+        factor_list = 10
+        checkpoint_proportion = 0.25
 
         sc = self.stats_coffea
         bring_back = False
-        force = False
-        min_accum = treereduction
-
-        bring_back = random.random() < 0.1
 
         if sc["events_processed"] >= sc["events_total"] or early_terminate:
             s = self.stats
+            factor_list = 2
+
+            if s.tasks_waiting == 0:
+                factor_list = 1
+                bring_back = True
             if s.tasks_waiting + s.tasks_on_workers == 0:
-                force = True
                 if len(self.tasks_to_accumulate) < 2:
                     return
-                elif min_accum > len(self.tasks_to_accumulate):
-                    bring_back = True
-                    min_accum = 1
+                elif treereduction > len(self.tasks_to_accumulate):
+                    factor_list = 0
 
-        if len(self.tasks_to_accumulate) < (2 * treereduction) - 1 and (not force):
+        if len(self.tasks_to_accumulate) < (factor_list * treereduction):
             return
 
-        self.tasks_to_accumulate.sort(key=lambda t: len(t))
-        for start in range(0, len(self.tasks_to_accumulate), treereduction):
-            if len(self.tasks_to_accumulate) < min_accum:
-                break
+        self.tasks_to_accumulate.sort(key=lambda t: t.get_metric("time_workers_execute_last"))
 
-            end = min(len(self.tasks_to_accumulate), treereduction)
-            next_to_accum = self.tasks_to_accumulate[0:end]
-            self.tasks_to_accumulate = self.tasks_to_accumulate[end:]
+        work_list = self.tasks_to_accumulate[:]
+        self.tasks_to_accumulate = []
+
+        if len(work_list) < treereduction:
+            treereduction = 1
+
+        for start in range(0, treereduction):
+            next_to_accum = work_list[start::treereduction]
+
+            if len(next_to_accum) < 2:
+                self.tasks_to_accumulate.extend(next_to_accum)
+                continue
+
+            nall = len(next_to_accum)
+            ncps = sum(t.is_checkpoint() for t in next_to_accum)
+            bring_back = bring_back or ((ncps / nall) <= checkpoint_proportion)
+            bring_back = bring_back or any(
+                [
+                    not t.is_checkpoint() and isinstance(t, AccumTask)
+                    for t in next_to_accum
+                ]
+            )
 
             accum_task = AccumTask(self, accum_fn, next_to_accum, bring_back_output=bring_back)
             self.submit(accum_task)
@@ -523,11 +540,13 @@ class CoffeaVine(Manager):
         # Enable monitoring and auto resource consumption, if desired:
         self.tune("category-steady-n-tasks", 3)
         self.tune("category-steady-n-tasks", 1)
+        self.tune("dispatch-many", 1)
+        self.tune("worker-retrievals", 0)
 
         # Evenly divide resources in workers per category
         self.tune("force-proportional-resources", 1)
 
-        self.tune("hungry-minimum", 100)
+        self.tune("hungry-minimum", 1000)
 
         # if resource_monitor is given, and not 'off', then monitoring is activated.
         # anything other than 'measure' is assumed to be 'watchdog' mode, where in
@@ -632,6 +651,8 @@ class CoffeaVineTask(PythonTask):
         self.itemid = itemid
         self.retries_to_go = m.executor.retries
         self.function = fn
+        self._checkpoint = False
+
         super().__init__(self.function, *item_args)
 
         self.disable_output_serialization()
@@ -658,6 +679,9 @@ class CoffeaVineTask(PythonTask):
 
     def _has_result(self):
         return not isinstance(self.output, PythonTaskNoResult)
+
+    def is_checkpoint(self):
+        return self._checkpoint
 
     # use output to return python result, rather than stdout as regular wq
     @property
