@@ -5,6 +5,8 @@ import signal
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from os.path import join
 
+from multiprocessing.pool import ThreadPool
+
 import collections
 
 import math
@@ -37,7 +39,7 @@ early_terminate = False
 # This function that accumulates results from files does not require taskvine.
 # We declare it before checking for taskvine so that we do not need to install taskvine at
 # the remote site.
-def accumulate_result_files(files_to_accumulate, accumulator=None):
+def PROFILE_accumulate_result_files(files_to_accumulate, accumulator=None):
     import time
     from datetime import datetime
 
@@ -112,6 +114,79 @@ def accumulate_result_files(files_to_accumulate, accumulator=None):
     print(s.getvalue())
 
     print("++++++++++++++")
+
+    return accumulator
+
+
+# This function that accumulates results from files does not require taskvine.
+# We declare it before checking for taskvine so that we do not need to install taskvine at
+# the remote site.
+def NORMAL_accumulate_result_files(files_to_accumulate, accumulator=None):
+    import time
+    from datetime import datetime
+
+    start = datetime.now().strftime("%H_%M_%S")
+    from coffea.processor import accumulate
+
+    # work on local copy of list
+    files_to_accumulate = list(files_to_accumulate)
+
+    load_time = 0
+    accum_time = 0
+
+    while files_to_accumulate:
+        f = files_to_accumulate.pop()
+
+        t = time.time_ns()
+        with open(f, "rb") as rf:
+            result = _decompress(rf.read())
+            load_time += time.time_ns() - t
+
+        if not accumulator:
+            accumulator = result
+            continue
+
+        t = time.time_ns()
+        accumulator = accumulate([result], accumulator)
+        accum_time += time.time_ns() - t
+
+        del result
+
+    end = datetime.now().strftime("%H_%M_%S")
+
+    print(
+        f"--------------- ACCUMTIMES: START: {start} END: {end} LOAD: {load_time/1e9} MERGE: {accum_time/1e9}",
+        flush=True,
+    )
+
+    return accumulator
+
+
+def accumulate_result_files(files_to_accumulate, accumulator=None, concurrent_reads=2):
+    def read_file(f):
+        with open(f, "rb") as rf:
+            return _decompress(rf.read())
+
+    import time
+    from datetime import datetime
+
+    start = datetime.now().strftime("%H_%M_%S")
+    from coffea.processor import accumulate
+
+    t = time.time_ns()
+    with ThreadPool(max(concurrent_reads + 1, 2)) as pool:
+        for result in pool.imap_unordered(read_file, list(files_to_accumulate), 1):
+            if not accumulator:
+                accumulator = result
+            else:
+                accumulator = accumulate([result], accumulator)
+
+    end = datetime.now().strftime("%H_%M_%S")
+
+    print(
+        f"--------------- ACCUMTIMES: START: {start} END: {end} TIME: {time.time_ns() - t}",
+        flush=True,
+    )
 
     return accumulator
 
@@ -210,6 +285,7 @@ class CoffeaVine(Manager):
         # taskvine always needs serializaiton to files, thus compression is always on
         if executor.compression is None:
             executor.compression = 1
+        executor.compression = -65535
 
         # activate monitoring if it has not been explicitely activated and we are
         # using an automatic resource allocation.
@@ -349,6 +425,9 @@ class CoffeaVine(Manager):
         self.submit(t)
         self.stats_coffea["events_submitted"] += len(t)
 
+    def all_to_accumulate_local(self):
+        return all([t.output_file.source() for t in self.tasks_to_accumulate])
+
     def _final_accumulation(self, accumulator):
         if len(self.tasks_to_accumulate) < 1:
             self.console.warn("No results available.")
@@ -399,7 +478,7 @@ class CoffeaVine(Manager):
     def _processing(self, items, function, accumulator):
         function = _compression_wrapper(self.executor.compression, function)
         accumulate_fn = _compression_wrapper(
-            self.executor.compression, accumulate_result_files
+            self.executor.compression, accumulate_result_files, self.executor.concurrent_reads
         )
 
         executor = self.executor
@@ -445,7 +524,7 @@ class CoffeaVine(Manager):
             if self.empty():
                 if self._items_empty:
                     break
-                if sc["events_total"] <= sc["events_processed"] and len(self.tasks_to_accumulate) < 2:
+                if sc["events_total"] <= sc["events_processed"] and len(self.tasks_to_accumulate) <= self.executor.treereduction and self.all_to_accumulate_local():
                     break
 
             self._submit_processing_tasks(proc_fn, items)
@@ -469,55 +548,69 @@ class CoffeaVine(Manager):
             self._submit_accum_tasks(accum_fn)
             self._update_bars()
 
+            self.console.printf(
+                "events {}/{}   accums {}/{}/{} local {}/{} all {}",
+                sc["events_processed"],
+                sc["events_total"],
+                sc["accumulations_done"],
+                sc["accumulations_submitted"],
+                self._estimate_accum_tasks(),
+                sum([bool(t.output_file.source()) for t in self.tasks_to_accumulate]),
+                len(self.tasks_to_accumulate),
+                self.all_to_accumulate_local(),
+            )
+
+
     def _submit_accum_tasks(self, accum_fn):
+        def _group(lst, n):
+            total = len(lst)
+            jump = math.ceil(total/n)
+            for start in range(jump):
+                yield lst[start::jump]
+
         treereduction = self.executor.treereduction
-        treereduction = 10
-        factor_list = 10
-        checkpoint_proportion = 0.25
+        checkpoint_proportion = 0.0
 
         sc = self.stats_coffea
         bring_back = False
+        force = False
+
+        factor = 3
 
         if sc["events_processed"] >= sc["events_total"] or early_terminate:
             s = self.stats
-            factor_list = 2
-
+            factor = 2
             if s.tasks_waiting == 0:
-                factor_list = 1
+                factor = 1
                 bring_back = True
-            if s.tasks_waiting + s.tasks_on_workers == 0:
-                if len(self.tasks_to_accumulate) < 2:
-                    return
-                elif treereduction > len(self.tasks_to_accumulate):
-                    factor_list = 0
 
-        if len(self.tasks_to_accumulate) < (factor_list * treereduction):
+            if s.tasks_waiting + s.tasks_on_workers == 0:
+                force = True
+                if len(self.tasks_to_accumulate) <= treereduction and self.all_to_accumulate_local():
+                    return
+
+        if (len(self.tasks_to_accumulate) < (factor * treereduction) - 1) and not force:
             return
 
         self.tasks_to_accumulate.sort(key=lambda t: t.get_metric("time_workers_execute_last"))
+        self.tasks_to_accumulate.sort(key=lambda t: len(t))
 
-        work_list = self.tasks_to_accumulate[:]
-        self.tasks_to_accumulate = []
+        if force:
+            work_list = self.tasks_to_accumulate
+            self.tasks_to_accumulate = []
+        else:
+            split = max(1, (factor - 1)) * treereduction
+            work_list = self.tasks_to_accumulate[0 : split]
+            self.tasks_to_accumulate = self.tasks_to_accumulate[split : ]
 
-        if len(work_list) < treereduction:
-            treereduction = 1
-
-        for start in range(0, treereduction):
-            next_to_accum = work_list[start::treereduction]
-
-            if len(next_to_accum) < 2:
+        for next_to_accum in _group(work_list, treereduction):
+            if len(next_to_accum) < 2 and not force:
                 self.tasks_to_accumulate.extend(next_to_accum)
                 continue
 
             nall = len(next_to_accum)
             ncps = sum(t.is_checkpoint() for t in next_to_accum)
             bring_back = bring_back or ((ncps / nall) <= checkpoint_proportion)
-            bring_back = bring_back or any(
-                [
-                    not t.is_checkpoint() and isinstance(t, AccumTask)
-                    for t in next_to_accum
-                ]
-            )
 
             accum_task = AccumTask(self, accum_fn, next_to_accum, bring_back_output=bring_back)
             self.submit(accum_task)
@@ -540,8 +633,14 @@ class CoffeaVine(Manager):
         # Enable monitoring and auto resource consumption, if desired:
         self.tune("category-steady-n-tasks", 3)
         self.tune("category-steady-n-tasks", 1)
-        self.tune("dispatch-many", 1)
-        self.tune("worker-retrievals", 0)
+        self.tune("prefer-dispatch", 1)
+        self.tune("ramp-down-heuristic", 1)
+        self.tune("immediate-recovery", 1)
+        self.tune("max-new-workers", 100)
+        self.tune("wait-for-workers", 100)
+        self.tune("max-retrievals", 10)
+        self.tune("attempt-schedule-depth", 200)
+        # self.tune("resource-submit-multiplier", 2)
 
         # Evenly divide resources in workers per category
         self.tune("force-proportional-resources", 1)
@@ -569,6 +668,10 @@ class CoffeaVine(Manager):
         for category in "default preprocessing processing accumulating".split():
             self.set_category_mode(category, mode)
             # self.set_category_resources_max(category, default_resources)
+
+        self.set_category_resources_max("preprocessing", {"cores": 1})
+        self.set_category_resources_max("processing", {"cores": 2})
+        self.set_category_resources_max("accumulating", {"cores": 4})
 
         # use auto mode max-throughput only for processing tasks
         if executor.resources_mode == "max-throughput":
@@ -954,6 +1057,7 @@ class AccumTask(CoffeaVineTask):
         if self.is_checkpoint():
             for t in self.tasks_to_accumulate:
                 t.cleanup_outputs(m)
+            self.tasks_to_accumulate = None
 
     def clone(self, m):
         return AccumTask(
@@ -1007,6 +1111,7 @@ def run(executor, items, function, accumulator):
 
 def _handle_early_terminate(signum, frame, raise_on_repeat=True):
     global early_terminate
+    raise KeyboardInterrupt
 
     if early_terminate and raise_on_repeat:
         raise KeyboardInterrupt

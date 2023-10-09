@@ -560,6 +560,8 @@ class TaskVineExecutor(ExecutorBase):
 
         treereduction : int
             Number of processed chunks per accumulation task. Defaults is 20.
+        concurrent_reads : int
+            Number of processed chunks concurrently read per accumulation task. Defaults is 2.
 
         verbose : bool
             If true, emit a message on each task submission and completion.
@@ -602,6 +604,7 @@ class TaskVineExecutor(ExecutorBase):
     disk: Optional[int] = None
     gpus: Optional[int] = None
     treereduction: int = 10
+    concurrent_reads: int = 2
     chunksize: int = 100000
     dynamic_chunksize: Optional[Dict] = None
     custom_init: Optional[Callable] = None
