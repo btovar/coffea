@@ -177,7 +177,7 @@ class WorkItem:
         return self.entrystop - self.entrystart
 
 
-def _compressX(item, compression):
+def _compress(item, compression):
     if item is None or compression is None:
         return item
     else:
@@ -188,29 +188,13 @@ def _compressX(item, compression):
         return result
 
 
-def _decompressX(item):
+def _decompress(item):
     if isinstance(item, bytes):
         # warning: if item is not exactly of type bytes, BytesIO(item) will
         # make a copy of it, increasing the memory usage.
         with BytesIO(item) as bf:
             with lz4f.open(bf, mode="rb") as f:
                 return pickle.load(f)
-    else:
-        return item
-
-
-def _compress(item, level):
-    with BytesIO() as bf:
-        pickle.dump(item, bf, protocol=_PICKLE_PROTOCOL)
-        return bf.getvalue()
-
-
-def _decompress(item):
-    if isinstance(item, bytes):
-        # warning: if item is not exactly of type bytes, BytesIO(item) will
-        # make a copy of it, increasing the memory usage.
-        with BytesIO(item) as bf:
-            return pickle.load(bf)
     else:
         return item
 
@@ -423,7 +407,7 @@ def _watcher(
                     elif isinstance(executor, ParslExecutor):
                         FH.add_merge(merge_fcn(batch))
                     else:
-                        raise RuntimeError("Invalid executor")
+                        raise RuniimeError("Invalid executor")
                     progress.update(
                         p_idm,
                         total=progress._tasks[p_idm].total + 1,

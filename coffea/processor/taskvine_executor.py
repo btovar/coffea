@@ -10,11 +10,8 @@ from multiprocessing.pool import ThreadPool
 import collections
 
 import math
-import scipy
 
 from coffea.util import rich_bar
-
-from io import BytesIO
 
 import cloudpickle
 
@@ -380,39 +377,8 @@ class CoffeaVine(Manager):
         )
         self.task_reports.append(r)
 
-    def _profile_wrapper(self, function):
-        def wrapped(*args, **kwargs):
-            import cProfile
-            import pstats
-            import io
-            from pstats import SortKey
-
-            pr = cProfile.Profile()
-            pr.enable()
-            result = function(*args, **kwargs)
-            pr.disable()
-
-            print("--- cumulative profile:")
-            s = io.StringIO()
-            sortby = SortKey.CUMULATIVE
-            ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-            ps.print_stats(10)
-            print(s.getvalue())
-            print("--- time profile:")
-            s = io.StringIO()
-            sortby = SortKey.TIME
-            ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-            ps.print_stats(10)
-            print(s.getvalue())
-
-            print("++++++++++++++")
-
-            return result
-        return wrapped
-
     def _preprocessing(self, items, function, accumulator):
         function = _compression_wrapper(self.executor.compression, function)
-        # function = self._profile_wrapper(function)
         for item in items:
             task = PreProcTask(self, function, item)
             self.submit(task)
