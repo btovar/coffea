@@ -191,6 +191,34 @@ def accumulate_result_files(files_to_accumulate, accumulator=None, concurrent_re
     return accumulator
 
 
+def get_s3_file(credentials, bucket_name, filename, output):
+    import boto3
+    from boto3.s3.transfer import TransferConfig
+    import os
+    import random
+
+    try:
+        os.environ["AWS_SHARED_CREDENTIALS_FILE"] = os.path.abspath(credentials)
+        config = TransferConfig(max_concurrency=1, use_threads=False)
+        #s3_resource = boto3.resource("s3")
+        s3_resource = boto3.resource("s3", endpoint_url=f"http://disc-store-{random.randint(1,11):03d}.crc.nd.edu:8000")
+        s3_object = s3_resource.Object(bucket_name, filename)
+        s3_object.download_file(output, Config=config)
+    except Exception as e:
+        import time
+        import traceback
+        with open("bad", "w") as f:
+            f.write(str(e))
+            f.write(traceback.format_exc())
+            f.write(str(filename))
+            f.write(str(output))
+        print(str(e))
+        print(traceback.format_exc())
+        print(str(filename))
+        print(str(output))
+        # time.sleep(900)
+
+
 try:
     import ndcctools.taskvine as vine
     from ndcctools.taskvine import Manager, PythonTask, PythonTaskNoResult
@@ -256,6 +284,8 @@ class CoffeaVine(Manager):
         if self.executor.environment_file:
             self.poncho_file = self.declare_poncho(executor.environment_file, cache=True)
 
+        self.s3_credentials = self.declare_file("/afs/crc.nd.edu/user/b/btovar/orgs/cms/ceph/sec/creds-read", cache=True)
+
         self.bar = StatusBar(enabled=executor.status)
         self.console = VerbosePrint(self.bar.console, executor.status, executor.verbose)
 
@@ -294,6 +324,16 @@ class CoffeaVine(Manager):
 
         executor.verbose = executor.verbose or executor.print_stdout
         executor.x509_proxy = _get_x509_proxy(executor.x509_proxy)
+
+    def s3_minitask(self, bucket_name, filename):
+        t = vine.PythonTask(get_s3_file, "s3_credentials", bucket_name, filename, "output")
+        t.add_input(self.s3_credentials, "s3_credentials")
+
+        fout = self.declare_file("output")
+        t.add_output(fout, "output")
+
+        f = self.declare_minitask(t, "output")
+        return f
 
     def submit(self, task):
         taskid = super().submit(task)
@@ -637,7 +677,7 @@ class CoffeaVine(Manager):
         self.tune("ramp-down-heuristic", 1)
         self.tune("immediate-recovery", 1)
         self.tune("max-new-workers", 100)
-        self.tune("wait-for-workers", 100)
+        self.tune("wait-for-workers", 0)
         self.tune("max-retrievals", 10)
         self.tune("attempt-schedule-depth", 200)
         # self.tune("resource-submit-multiplier", 2)
@@ -905,10 +945,14 @@ class PreProcTask(CoffeaVineTask):
         self.item = item
 
         self.size = 1
-        super().__init__(m, fn, [item], itemid, bring_back_output=True)
+        super().__init__(m, fn, [self.item], itemid, bring_back_output=True)
 
         self.set_category("preprocessing")
-        if re.search("://", item.filename) or os.path.isabs(item.filename):
+        if re.search("-cephfs-", item.filename):
+            print(item.filename)
+            f = m.s3_minitask("topeft-skims", item.filename)
+            self.add_input(f, item.filename)
+        elif re.search("://", item.filename) or os.path.isabs(item.filename):
             # This looks like an URL or an absolute path (assuming shared
             # filesystem). Not transfering file.
             pass
@@ -938,12 +982,13 @@ class ProcTask(CoffeaVineTask):
             itemid = "p_{}".format(CoffeaVineTask.tasks_counter)
 
         self.item = item
-
         super().__init__(m, fn, [item], itemid, bring_back_output=bring_back_output)
 
         self.set_category("processing")
-
-        if re.search("://", item.filename) or os.path.isabs(item.filename):
+        if re.search("-cephfs-", item.filename):
+            f = m.s3_minitask("topeft-skims", item.filename)
+            self.add_input(f, item.filename)
+        elif re.search("://", item.filename) or os.path.isabs(item.filename):
             # This looks like an URL or an absolute path (assuming shared
             # filesystem). Not transfering file.
             pass

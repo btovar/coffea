@@ -8,6 +8,7 @@ import pickle
 import sys
 import math
 import json
+import re
 import cloudpickle
 import toml
 import uproot
@@ -181,6 +182,20 @@ def _compress(item, compression):
     if item is None or compression is None:
         return item
     else:
+        return pickle.dumps(item, protocol=_PICKLE_PROTOCOL)
+
+
+def _decompress(item):
+    if isinstance(item, bytes):
+        return pickle.loads(item)
+    else:
+        return item
+
+
+def _xcompress(item, compression):
+    if item is None or compression is None:
+        return item
+    else:
         with BytesIO() as bf:
             with lz4f.open(bf, mode="wb", compression_level=compression) as f:
                 pickle.dump(item, f, protocol=_PICKLE_PROTOCOL)
@@ -188,7 +203,7 @@ def _compress(item, compression):
         return result
 
 
-def _decompress(item):
+def _xdecompress(item):
     if isinstance(item, bytes):
         # warning: if item is not exactly of type bytes, BytesIO(item) will
         # make a copy of it, increasing the memory usage.
@@ -1593,6 +1608,12 @@ class Runner:
                     "list of filenames in fileset must be a list or a dict"
                 )
             for filename in filelist:
+                if re.search("s3://", filename):
+                    filename = filename.replace("s3://topeft-skims/", "")
+                    filename = filename.replace("/", "-")
+                if re.search("http://disc-head-001", filename):
+                    import random
+                    filename = filename.replace("head-001", f"store-{random.randint(1,11):03d}")
                 yield FileMeta(dataset, filename, local_treename, user_meta)
 
     @staticmethod
