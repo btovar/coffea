@@ -34,6 +34,7 @@ def test_taskvine_local_env():
         return
 
     m = DaskVine(port=0)
+
     workers = Factory(manager=m, batch_type="local")
     workers.min_workers = 1
     workers.max_workers = 1
@@ -42,10 +43,9 @@ def test_taskvine_local_env():
     q1_hist = histogram_common()
     with workers:
         result = q1_hist.compute(
-            scheduler=m.get, resources={"cores": 1}, resources_mode=None
+            scheduler=m.get, resources={"cores": 1}, resources_mode=None,
         )
         assert result.sum() == 40.0
-
 
 @pytest.mark.skipif(
     "'CONDA_PREFIX' not in os.environ",
@@ -55,13 +55,18 @@ def test_taskvine_remote_env():
     try:
         from ndcctools.poncho import package_create
         from ndcctools.taskvine import DaskVine, Factory
+        import ndcctools.taskvine
+        print(ndcctools.taskvine.__file__)
     except ImportError:
         print("taskvine is not installed. Omitting test.")
         return
-    env_filename = "vine-env.tar.gz"
-    package_create.pack_env(os.environ["CONDA_PREFIX"], env_filename)
+    #env_filename = "vine-env.tar.gz"
+    #package_create.pack_env(os.environ["CONDA_PREFIX"], env_filename)
+
+    env_filename = "env.tar.gz"
 
     m = DaskVine(port=0)
+    vdir = m.declare_file(f"{os.environ['CONDA_PREFIX']}/lib/python3.11/site-packages/ndcctools", cache=True)
     env = m.declare_poncho(env_filename, cache=True)
 
     workers = Factory(manager=m, batch_type="local")
@@ -76,5 +81,6 @@ def test_taskvine_remote_env():
             resources={"cores": 1},
             resources_mode=None,
             environment=env,
+            extra_files={vdir: "ndcctools"},
         )
         assert result.sum() == 40.0
